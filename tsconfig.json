@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "rootDir": "src/",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "app/",
+    "sourceMap": true,
+    "strict": true,
+    "target": "ES6"
+  },
+  "exclude": ["node_modules"],
+  "include": ["src/**/*.ts", "types.d.ts"]
+}

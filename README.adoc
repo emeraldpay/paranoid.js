@@ -1,0 +1,82 @@
+= Paranoid JS
+
+Check date of a Node project dependencies to ensure there is _no too recent_ dependency.
+
+The reasoning behind such check is to allow only packages that are old enough to be already used by a broad community of JS Developer.
+And specifically, to avoid a Supply Chain Attack through an update of a package with a malicious code.
+It's expected that a malicious package doesn't live long before getting noticed by someone.
+In most cases such attacks make most damage in first few days after publishing.
+So the Paranoid JS tries to minimize a chance of executing/using a package during this time.
+
+Paranoid JS:
+
+1. Verifies all dependencies of a Node project
+2. Including all subsequent dependencies
+3. By downloading package manifests from NPM registry
+4. And checking the date of publication
+5. Exiting with an _error_ if a package is too recent
+
+Paranoid JS uses information from NPM API, so it can be used without running a `npm install`.
+That's an important moment because a malicious code can run its code during a package installation, which we want to avoid.
+
+NOTE: There is no 100% protection from Supply Attack.
+Paranoid JS gives additional protection against common attacks, but cannot protect from all.
+The software is provides AS IS without any warranties.
+
+.Install
+----
+npm install -g @emeraldpay/paranoid-js
+----
+
+.Usage:
+----
+Usage: index [options] <path>
+
+Arguments:
+  path                     Path to project directory
+
+Options:
+  -a, --allow <allow>      Comma separated list of allowed packages with version spec (<package>@<spec>)
+  -d, --deny <deny>        Comma separated list of denied packages with version spec (<package>@<spec>)
+  -e, --exclude <exclude>  Comma separated list of exclude packages from validating
+  -i, --include <include>  Comma separated list of include packages from validating
+  -m, --minDays <days>     Minimum days after publish
+  -j, --json               Display output as JSON
+  -u, --unsafe             Return only unsafe packages
+  --debug                  Show debug messages
+  --includeDev             Include development dependencies for validation
+  -h, --help               display help for command
+----
+
+.Example output:
+----
+$ node ./app/index.js /path/to/project --unsafe
+info: Start loading dependency list...
+info: Retrieving packages metadata...
+info: Validate dependencies...
+warn: Package graceful-fs:4.2.10 is not safe (15 day(s) since last publish)
+warn: Package https-proxy-agent:5.0.1 is not safe (5 day(s) since last publish)
+----
+
+== No Warranties
+
+Paranoid JS is provided to You "AS IS" and with all faults and defects without warranty of any kind.
+
+To the maximum extent permitted under applicable law, EmeraldPay, Inc, on its own behalf and on behalf of its affiliates and its and their respective licensors and service providers, expressly disclaims all warranties, whether express, implied, statutory or otherwise, with respect to the Paranoid JS, including all implied warranties of merchantability, fitness for a particular purpose, title and non-infringement, and warranties that may arise out of course of dealing, course of performance, usage or trade practice.
+Without limitation to the foregoing, EmeraldPay, Inc provides no warranty or undertaking, and makes no representation of any kind that the Paranoid JS will meet your requirements, achieve any intended results, be compatible or work with any other software, applications, systems or services, operate without interruption, meet any performance or reliability standards or be error free or that any errors or defects can or will be corrected.
+
+== License
+
+Copyright 2022 EmeraldPay, Inc
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and limitations under the License.
+
+
+
+
