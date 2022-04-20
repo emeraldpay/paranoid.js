@@ -74,6 +74,7 @@ export function validateDependencies(
       const { days } = now.diff(DateTime.fromISO(published), 'days');
 
       validation.set(packument.name, {
+        version,
         daysSincePublish: Math.floor(days),
         safe: days >= (config.minDays ?? 30)
       });

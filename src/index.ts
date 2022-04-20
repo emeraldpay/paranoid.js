@@ -180,13 +180,13 @@ const logger = createLogger({
 
     console.log(JSON.stringify(data));
   } else {
-    for (const [name, { daysSincePublish, safe }] of validation) {
+    for (const [name, { version, daysSincePublish, safe }] of validation) {
       if (safe) {
         if (config.unsafe !== true) {
-          logger.info(`Package ${name} is safe`);
+          logger.info(`Package ${name}:${version} is safe`);
         }
       } else {
-        logger.warn(`Package ${name} is not safe (${daysSincePublish} day(s) since last publish)`);
+        logger.warn(`Package ${name}:${version} is not safe (${daysSincePublish} day(s) since last publish)`);
       }
 
       fullSafe = fullSafe && safe;

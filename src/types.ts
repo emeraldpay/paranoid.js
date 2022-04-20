@@ -26,6 +26,7 @@ export interface Node {
 }
 
 export interface Validation {
+  version: string;
   daysSincePublish: number;
   safe: boolean;
 }
