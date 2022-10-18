@@ -2,27 +2,32 @@
 
 import { existsSync } from 'fs';
 import { resolve as resolvePath } from 'path';
-import { exit } from 'process';
+import * as process from 'process';
 import * as Arborist from '@npmcli/arborist';
 import { Command } from 'commander';
 import { Packument } from 'pacote';
 import { createLogger, format as loggerFormat, transports as loggerTransports } from 'winston';
 import { Config, ExitCode, Node, Validation } from './types';
-import { buildFlatDependencies, processDependencies, validateDependencies } from './utils';
+import {
+  buildFlatDependencies,
+  loadYarnLockfileDependencies,
+  processDependencies,
+  validateDependencies,
+} from './utils';
 
 const program = new Command();
 
 program
-  .argument('<path>', 'Path to project directory')
-  .option('-a, --allow <allow>', 'Comma separated list of allowed packages with version spec (<package>@<spec>)')
-  .option('-d, --deny <deny>', 'Comma separated list of denied packages with version spec (<package>@<spec>)')
-  .option('-e, --exclude <exclude>', 'Comma separated list of exclude packages from validating')
-  .option('-i, --include <include>', 'Comma separated list of include packages from validating')
-  .option('-m, --minDays <days>', 'Minimum days after publish')
-  .option('-j, --json', 'Display output as JSON')
-  .option('-u, --unsafe', 'Return only unsafe packages')
-  .option('--debug', 'Show debug messages')
-  .option('--includeDev', 'Include development dependencies for validation')
+  .argument('<path>', 'path to project directory')
+  .option('-a, --allow <allow>', 'comma separated list of allowed packages with version spec (<package>@<spec>)')
+  .option('-d, --deny <deny>', 'comma separated list of denied packages with version spec (<package>@<spec>)')
+  .option('-e, --exclude <exclude>', 'comma separated list of exclude packages from validating')
+  .option('-i, --include <include>', 'comma separated list of include packages from validating')
+  .option('-m, --minDays <days>', 'minimum days after publish (default 14)')
+  .option('-j, --json', 'display output as JSON')
+  .option('-u, --unsafe', 'return only unsafe packages')
+  .option('--debug', 'show debug messages')
+  .option('--excludeDev', 'exclude development dependencies for validation (ignored for Yarn projects only)')
   .parse();
 
 const [path] = program.args;
@@ -48,7 +53,7 @@ const logger = createLogger({
         deny: resource.deny,
         exclude: resource.exclude,
         include: resource.include,
-        includeDev: resource.includeDev,
+        excludeDev: resource.excludeDev,
         json: resource.json,
         minDays: resource.minDays,
         unsafe: resource.unsafe,
@@ -57,7 +62,7 @@ const logger = createLogger({
       logger.error('Cannot import resource file');
       logger.debug(exception);
 
-      exit(ExitCode.ERROR);
+      process.exit(ExitCode.ERROR);
     }
   }
 
@@ -103,8 +108,8 @@ const logger = createLogger({
       .map((include: string) => include.trim());
   }
 
-  if (options.includeDev != null) {
-    config.includeDev = true;
+  if (options.excludeDev != null) {
+    config.excludeDev = true;
   }
 
   if (options.json != null) {
@@ -121,30 +126,37 @@ const logger = createLogger({
     config.unsafe = true;
   }
 
-  const hasLockFile = existsSync(resolvePath(path, 'package-lock.json'));
-  const hasNodeModules = existsSync(resolvePath(path, 'node_modules'));
+  const yarnLockfilePath = resolvePath(path, 'yarn.lock');
 
-  if (!hasLockFile && !hasNodeModules) {
+  const hasNpmLockfile = existsSync(resolvePath(path, 'package-lock.json'));
+  const hasNodeModules = existsSync(resolvePath(path, 'node_modules'));
+  const hasYarnLockfile = existsSync(yarnLockfilePath);
+
+  !(config.json ?? false) && logger.info('Start loading dependency list...');
+
+  let dependencies: Map<string, Set<string>>;
+
+  if (hasNpmLockfile || (hasNodeModules && !hasYarnLockfile)) {
+    const arborist = new Arborist({ path });
+
+    let tree: Node;
+
+    if (hasNpmLockfile) {
+      tree = await arborist.loadVirtual();
+    } else {
+      tree = await arborist.loadActual();
+    }
+
+    dependencies = buildFlatDependencies(tree, config);
+  } else if (hasYarnLockfile) {
+    dependencies = await loadYarnLockfileDependencies(yarnLockfilePath);
+  } else {
     logger.error('Cannot find "package-lock.json" file or "node_modules" folder in specified directory');
 
-    exit(ExitCode.ERROR);
+    process.exit(ExitCode.ERROR);
   }
 
-  let tree: Node;
-
-  (config.json ?? false) === false && logger.info('Start loading dependency list...');
-
-  const arborist = new Arborist({ path });
-
-  if (hasLockFile) {
-    tree = await arborist.loadVirtual();
-  } else {
-    tree = await arborist.loadActual();
-  }
-
-  const dependencies = buildFlatDependencies(tree, config);
-
-  (config.json ?? false) === false && logger.info('Retrieving packages metadata...');
+  !(config.json ?? false) && logger.info('Retrieving packages metadata...');
 
   let packuments: Packument[];
 
@@ -154,10 +166,10 @@ const logger = createLogger({
     logger.error(`Error while retrieving packages metadata: ${(exception as Error).message}`);
     logger.debug(exception);
 
-    exit(ExitCode.ERROR);
+    process.exit(ExitCode.ERROR);
   }
 
-  (config.json ?? false) === false && logger.info('Validate dependencies...');
+  !(config.json ?? false) && logger.info('Validate dependencies...');
 
   const validation = validateDependencies(dependencies, packuments, config);
 
@@ -175,23 +187,23 @@ const logger = createLogger({
         data[name] = valid;
       }
 
-      fullSafe = fullSafe && valid.safe;
+      fullSafe &&= valid.safe;
     }
 
     console.log(JSON.stringify(data));
   } else {
-    for (const [name, { version, daysSincePublish, safe }] of validation) {
+    for (const [name, { daysSincePublish, safe, version }] of validation) {
       if (safe) {
         if (config.unsafe !== true) {
-          logger.info(`Package ${name}:${version} is safe`);
+          logger.info(`Package ${name}@${version} is safe`);
         }
       } else {
-        logger.warn(`Package ${name}:${version} is not safe (${daysSincePublish} day(s) since last publish)`);
+        logger.warn(`Package ${name}@${version} is not safe (${daysSincePublish} day(s) since last publish)`);
       }
 
-      fullSafe = fullSafe && safe;
+      fullSafe &&= safe;
     }
   }
 
-  exit(fullSafe ? ExitCode.OK : ExitCode.FAIL);
+  process.exit(fullSafe ? ExitCode.OK : ExitCode.FAIL);
 })();

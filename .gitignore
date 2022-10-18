@@ -1,4 +1,6 @@
-/app/
-/node_modules/
+.idea/
+app/
+node_modules/
 *.iml
-*.d.ts
+.paranoidrc.js
+emeraldpay-paranoid-js-*.tgz

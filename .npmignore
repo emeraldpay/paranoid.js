@@ -1,0 +1,9 @@
+.idea/
+.vscode/
+*.iml
+.editorconfig
+.eslintignore
+.eslintrc.js
+.paranoidrc.js*
+.prettierrc.js
+emeraldpay-paranoid-js-*.tgz

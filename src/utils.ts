@@ -1,9 +1,17 @@
+import { promises as fsPromises } from 'fs';
+import { parseSyml } from '@yarnpkg/parsers';
 import { DateTime } from 'luxon';
-import { Packument, packument } from 'pacote';
-import { maxSatisfying as maxSatisfyingVersion, satisfies as versionSatisfies } from 'semver';
-import { Config, Node, Validation } from './types';
+import { Packument, PackumentResult, packument } from 'pacote';
+import {
+  gt as isGreaterVersion,
+  maxSatisfying as maxSatisfyingVersion,
+  minVersion,
+  validRange,
+  satisfies as versionSatisfies,
+} from 'semver';
+import { Config, Dependencies, Node, Validation } from './types';
 
-const packumentOptions = { fullMetadata: true, preferOnline: true };
+const specRegex = /^(@?[^@]+)@([^$]+)$/;
 
 function arrayToRegExp(array?: Array<string>): null | RegExp {
   if (array == null) {
@@ -13,13 +21,17 @@ function arrayToRegExp(array?: Array<string>): null | RegExp {
   return new RegExp(array.map((exclude) => exclude.replace('/*', '\\/.*')).join('|'));
 }
 
-export function buildFlatDependencies(tree: Node, config: Config): Map<string, string> {
-  let dependencies = new Map<string, string>();
+export function buildFlatDependencies(tree: Node, config: Config): Dependencies {
+  let dependencies = new Map<string, Set<string>>();
 
   for (const [name, edge] of tree.edgesOut) {
-    if (config.includeDev === true || !edge.dev) {
-      dependencies.set(name, edge.spec);
+    if (config.excludeDev && edge.dev) {
+      continue;
     }
+
+    const specs = dependencies.get(name);
+
+    dependencies.set(name, specs?.add(edge.spec) ?? new Set([edge.spec]));
   }
 
   for (const [, subTree] of tree.children) {
@@ -31,15 +43,56 @@ export function buildFlatDependencies(tree: Node, config: Config): Map<string, s
   return dependencies;
 }
 
-export function processDependencies(dependencies: Map<string, string>, config: Config): Promise<Array<Packument>> {
+export async function loadYarnLockfileDependencies(path: string): Promise<Dependencies> {
+  const content = await fsPromises.readFile(path);
+
+  const parsed = parseSyml(content.toString());
+
+  const dependencies = new Map<string, Set<string>>();
+
+  for (const [key, { version }] of Object.entries(parsed)) {
+    if (key === '__metadata') {
+      continue;
+    }
+
+    const [, name, spec] = key.match(specRegex) ?? [];
+
+    if (name != null) {
+      let currentSpec = spec;
+
+      if (spec == null || validRange(spec) == null) {
+        currentSpec = version;
+      }
+
+      const specs = dependencies.get(name);
+
+      dependencies.set(name, specs?.add(currentSpec) ?? new Set([currentSpec]));
+    }
+  }
+
+  return dependencies;
+}
+
+export function processDependencies(dependencies: Dependencies, config: Config): Promise<Array<Packument>> {
   const excluded = arrayToRegExp(config.exclude);
   const included = arrayToRegExp(config.include);
 
-  const promises: Array<Promise<Packument>> = [];
+  const promises: Array<Promise<Packument & PackumentResult>> = [];
 
-  for (const [name, spec] of dependencies) {
+  for (const [name, specs] of dependencies) {
     if ((included?.test(name) ?? true) && !(excluded?.test(name) ?? false)) {
-      promises.push(packument(`${name}@${spec}`, packumentOptions));
+      const spec = [...specs].reduce((carry, item) => {
+        const itemVersion = minVersion(item);
+        const carryVersion = minVersion(carry);
+
+        if (itemVersion == null || carryVersion == null) {
+          return carry;
+        }
+
+        return isGreaterVersion(itemVersion, carryVersion) ? item : carry;
+      }, '^0.0.0');
+
+      promises.push(packument(`${name}@${spec}`, { fullMetadata: true, preferOnline: true }));
     }
   }
 
@@ -47,7 +100,7 @@ export function processDependencies(dependencies: Map<string, string>, config: C
 }
 
 export function validateDependencies(
-  dependencies: Map<string, string>,
+  dependencies: Dependencies,
   packuments: Array<Packument>,
   config: Config,
 ): Map<string, Validation> {
@@ -60,24 +113,27 @@ export function validateDependencies(
       (version) => version !== 'created' && version !== 'modified',
     );
 
-    const spec = dependencies.get(packument.name) ?? '*';
-    const version = maxSatisfyingVersion(versions, spec) ?? '0.0.0';
+    const specs = dependencies.get(packument.name) ?? new Set(['*']);
 
-    const allowedSpec = config.allow?.get(packument.name);
-    const deniedSpec = config.deny?.get(packument.name);
+    for (const spec of specs) {
+      const version = maxSatisfyingVersion(versions, spec) ?? '0.0.0';
 
-    if (
-      (allowedSpec == null || versionSatisfies(version, allowedSpec)) &&
-      (deniedSpec == null || versionSatisfies(version, deniedSpec))
-    ) {
-      const published = packument.time?.[version] ?? now.toISO();
-      const { days } = now.diff(DateTime.fromISO(published), 'days');
+      const allowedSpec = config.allow?.get(packument.name);
+      const deniedSpec = config.deny?.get(packument.name);
 
-      validation.set(packument.name, {
-        version,
-        daysSincePublish: Math.floor(days),
-        safe: days >= (config.minDays ?? 30)
-      });
+      if (
+        (allowedSpec == null || versionSatisfies(version, allowedSpec)) &&
+        (deniedSpec == null || versionSatisfies(version, deniedSpec))
+      ) {
+        const published = packument.time?.[version] ?? now.toISO();
+        const { days } = now.diff(DateTime.fromISO(published), 'days');
+
+        validation.set(packument.name, {
+          version,
+          daysSincePublish: Math.floor(days),
+          safe: days >= (config.minDays ?? 14),
+        });
+      }
     }
   });
 

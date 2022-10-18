@@ -1,0 +1,10 @@
+module.exports = {
+  // allow: { package: '^1.0.0' },
+  // deny: { package: '^1.0.0' },
+  // exclude: ['package'],
+  // include: ['package'],
+  // excludeDev: false,
+  // json: true,
+  // minDays: 14,
+  // unsafe: true,
+};

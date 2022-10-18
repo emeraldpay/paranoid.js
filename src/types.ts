@@ -9,7 +9,7 @@ export interface Config {
   deny?: Map<string, string>;
   exclude?: Array<string>;
   include?: Array<string>;
-  includeDev?: boolean;
+  excludeDev?: boolean;
   json?: boolean;
   minDays?: number;
   unsafe?: boolean;
@@ -26,7 +26,9 @@ export interface Node {
 }
 
 export interface Validation {
-  version: string;
   daysSincePublish: number;
   safe: boolean;
+  version: string;
 }
+
+export type Dependencies = Map<string, Set<string>>;
