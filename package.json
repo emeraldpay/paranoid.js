@@ -1,7 +1,7 @@
 {
   "name": "@emeraldpay/paranoid-js",
   "description": "Check dependencies to ensure there is no too recent updates",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "license": "Apache-2.0",
   "contributors": [
     "Sergei Novikov",
