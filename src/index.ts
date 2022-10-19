@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync } from 'fs';
+import { existsSync, statSync as pathStat } from 'fs';
 import { resolve as resolvePath } from 'path';
 import * as process from 'process';
 import * as Arborist from '@npmcli/arborist';
@@ -19,6 +19,7 @@ const program = new Command();
 
 program
   .argument('<path>', 'path to project directory')
+  .option('-c, --config <path>', 'Specify path to config file')
   .option('-a, --allow <allow>', 'comma separated list of allowed packages with version spec (<package>@<spec>)')
   .option('-d, --deny <deny>', 'comma separated list of denied packages with version spec (<package>@<spec>)')
   .option('-e, --exclude <exclude>', 'comma separated list of exclude packages from validating')
@@ -28,6 +29,8 @@ program
   .option('-u, --unsafe', 'return only unsafe packages')
   .option('--debug', 'show debug messages')
   .option('--excludeDev', 'exclude development dependencies for validation (ignored for Yarn projects only)')
+  .option('--ignoreConfig', 'Ignore all options from config file')
+  .option('--ignoreOptions <options>', 'Comma separated list of options to ignore from config file')
   .parse();
 
 const [path] = program.args;
@@ -40,29 +43,66 @@ const logger = createLogger({
 });
 
 (async () => {
-  const resourcePath = resolvePath(path, '.paranoidrc.js');
-
   let config: Config = {};
 
-  if (existsSync(resourcePath)) {
-    try {
-      const resource: Config = await import(resourcePath);
+  if (options.ignoreConfig == null) {
+    let configPath: string | undefined;
 
-      config = {
-        allow: resource.allow,
-        deny: resource.deny,
-        exclude: resource.exclude,
-        include: resource.include,
-        excludeDev: resource.excludeDev,
-        json: resource.json,
-        minDays: resource.minDays,
-        unsafe: resource.unsafe,
-      };
-    } catch (exception) {
-      logger.error('Cannot import resource file');
-      logger.debug(exception);
+    if (options.config == null) {
+      const projectConfigPath = resolvePath(path, '.paranoidrc.js');
 
-      process.exit(ExitCode.ERROR);
+      if (existsSync(projectConfigPath)) {
+        configPath = projectConfigPath;
+      }
+    } else {
+      const optionConfigPath = resolvePath(options.config);
+
+      if (existsSync(optionConfigPath) && pathStat(optionConfigPath).isFile()) {
+        configPath = optionConfigPath;
+      } else {
+        logger.error('Cannot find specified config file');
+
+        process.exit(ExitCode.ERROR);
+      }
+    }
+
+    if (configPath != null) {
+      try {
+        const configData: Config = await import(configPath);
+
+        config = {
+          allow: configData.allow,
+          deny: configData.deny,
+          exclude: configData.exclude,
+          include: configData.include,
+          excludeDev: configData.excludeDev,
+          json: configData.json,
+          minDays: configData.minDays,
+          unsafe: configData.unsafe,
+        };
+      } catch (exception) {
+        logger.error('Cannot read config file');
+        logger.debug(exception);
+
+        process.exit(ExitCode.ERROR);
+      }
+    }
+
+    if (options.ignoreOptions != null) {
+      const ignoredOptions: string[] = options.ignoreOptions.split(',').map((option: string) => option.trim());
+
+      if (ignoredOptions.length > 0) {
+        config = Object.keys(config).reduce<Config>((carry, option) => {
+          if (ignoredOptions.includes(option)) {
+            return carry;
+          }
+
+          return {
+            ...carry,
+            [option]: config[option as keyof Config],
+          };
+        }, {});
+      }
     }
   }
 
