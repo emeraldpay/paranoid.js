@@ -3,8 +3,9 @@ module.exports = {
   // deny: { package: '^1.0.0' },
   // exclude: ['package'],
   // include: ['package'],
-  // excludeDev: false,
-  // json: true,
   // minDays: 14,
+  // json: true,
+  // production: true
   // unsafe: true,
+  // excludeDev: false,
 };

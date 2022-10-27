@@ -1,0 +1,10 @@
+{
+  "name": "example",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "yarn@1.22.19",
+  "dependencies": {
+    "fastify": "4.8.0",
+    "semver": "4.3.1"
+  }
+}

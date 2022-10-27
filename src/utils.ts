@@ -4,16 +4,17 @@ import { DateTime } from 'luxon';
 import { Packument, PackumentResult, packument } from 'pacote';
 import {
   gt as isGreaterVersion,
+  lt as isLessVersion,
   maxSatisfying as maxSatisfyingVersion,
   minVersion,
   validRange,
   satisfies as versionSatisfies,
 } from 'semver';
-import { Config, Dependencies, Node, Validation } from './types';
+import { Config, Dependencies, Dependency, Node, Recommendation, Validation, Vulnerabilities } from './types';
 
-const specRegex = /^(@?[^@]+)@([^$]+)$/;
+const specRegex = /^(@?[^@]+)@([^:]+:)?([^$]+)$/;
 
-function arrayToRegExp(array?: Array<string>): null | RegExp {
+function arrayToRegExp(array?: string[]): null | RegExp {
   if (array == null) {
     return null;
   }
@@ -22,16 +23,25 @@ function arrayToRegExp(array?: Array<string>): null | RegExp {
 }
 
 export function buildFlatDependencies(tree: Node, config: Config): Dependencies {
-  let dependencies = new Map<string, Set<string>>();
+  let dependencies = new Map<string, Dependency>();
 
   for (const [name, edge] of tree.edgesOut) {
     if (config.excludeDev && edge.dev) {
       continue;
     }
 
-    const specs = dependencies.get(name);
+    const dependency: Dependency = dependencies.get(name) ?? {
+      specs: new Set(),
+      versions: new Set(),
+    };
 
-    dependencies.set(name, specs?.add(edge.spec) ?? new Set([edge.spec]));
+    dependency.specs.add(edge.spec);
+
+    if (edge.to?.version != null) {
+      dependency.versions.add(edge.to.version);
+    }
+
+    dependencies.set(name, dependency);
   }
 
   for (const [, subTree] of tree.children) {
@@ -48,38 +58,42 @@ export async function loadYarnLockfileDependencies(path: string): Promise<Depend
 
   const parsed = parseSyml(content.toString());
 
-  const dependencies = new Map<string, Set<string>>();
+  const dependencies = new Map<string, Dependency>();
 
   for (const [key, { version }] of Object.entries(parsed)) {
     if (key === '__metadata') {
       continue;
     }
 
-    const [, name, spec] = key.match(specRegex) ?? [];
+    const [, name, protocol, spec] = key.match(specRegex) ?? [];
 
-    if (name != null) {
-      let currentSpec = spec;
+    if (spec == null || validRange(spec) == null) {
+      continue;
+    }
 
-      if (spec == null || validRange(spec) == null) {
-        currentSpec = version;
-      }
+    if (name != null && (protocol == null || protocol === 'npm:')) {
+      const dependency: Dependency = dependencies.get(name) ?? {
+        specs: new Set(),
+        versions: new Set(),
+      };
 
-      const specs = dependencies.get(name);
+      dependency.specs.add(spec);
+      dependency.versions.add(version);
 
-      dependencies.set(name, specs?.add(currentSpec) ?? new Set([currentSpec]));
+      dependencies.set(name, dependency);
     }
   }
 
   return dependencies;
 }
 
-export function processDependencies(dependencies: Dependencies, config: Config): Promise<Array<Packument>> {
+export function processDependencies(dependencies: Dependencies, config: Config): Promise<Packument[]> {
   const excluded = arrayToRegExp(config.exclude);
   const included = arrayToRegExp(config.include);
 
   const promises: Array<Promise<Packument & PackumentResult>> = [];
 
-  for (const [name, specs] of dependencies) {
+  for (const [name, { specs }] of dependencies) {
     if ((included?.test(name) ?? true) && !(excluded?.test(name) ?? false)) {
       const spec = [...specs].reduce((carry, item) => {
         const itemVersion = minVersion(item);
@@ -101,19 +115,31 @@ export function processDependencies(dependencies: Dependencies, config: Config):
 
 export function validateDependencies(
   dependencies: Dependencies,
-  packuments: Array<Packument>,
+  packuments: Packument[],
+  vulnerabilities: Vulnerabilities,
   config: Config,
-): Map<string, Validation> {
+): Map<string, Validation[]> {
   const now = DateTime.now();
 
-  const validation = new Map<string, Validation>();
+  const validations = new Map<string, Validation[]>();
 
   packuments.forEach((packument) => {
     const versions = Object.keys(packument.time ?? {}).filter(
       (version) => version !== 'created' && version !== 'modified',
     );
 
-    const specs = dependencies.get(packument.name) ?? new Set(['*']);
+    const dependency = dependencies.get(packument.name);
+    const vulnerability = vulnerabilities.get(packument.name);
+
+    let specs: Set<string> = new Set(['*']);
+
+    if (dependency != null) {
+      if (config.production && dependency.versions.size > 0) {
+        specs = dependency.versions;
+      } else {
+        ({ specs } = dependency);
+      }
+    }
 
     for (const spec of specs) {
       const version = maxSatisfyingVersion(versions, spec) ?? '0.0.0';
@@ -128,14 +154,43 @@ export function validateDependencies(
         const published = packument.time?.[version] ?? now.toISO();
         const { days } = now.diff(DateTime.fromISO(published), 'days');
 
-        validation.set(packument.name, {
+        const recommendations: Recommendation[] = [];
+
+        if (vulnerability != null) {
+          for (const advisory of vulnerability) {
+            if (advisory.testVersion(version) ?? false) {
+              const fixedVersion = advisory.versions
+                .filter((item) => !advisory.vulnerableVersions.includes(item) && isGreaterVersion(item, version))
+                .reduce<string | null>(
+                  (carry, item) => (carry == null ? item : isLessVersion(item, carry) ? item : carry),
+                  null,
+                );
+
+              recommendations.push({
+                fixedVersion,
+                dependency: advisory.dependency,
+                range: advisory.range,
+                severity: advisory.severity,
+                title: advisory.title,
+                url: advisory.url,
+              });
+            }
+          }
+        }
+
+        const validation = validations.get(packument.name) ?? [];
+
+        validation.push({
+          recommendations,
           version,
           daysSincePublish: Math.floor(days),
           safe: days >= (config.minDays ?? 14),
         });
+
+        validations.set(packument.name, validation);
       }
     }
   });
 
-  return validation;
+  return validations;
 }

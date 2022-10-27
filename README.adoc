@@ -33,19 +33,23 @@ npm install -g @emeraldpay/paranoid-js
 Usage: index [options] <path>
 
 Arguments:
-  path                     path to project directory
+  path                       path to project directory
 
 Options:
-  -a, --allow <allow>      comma separated list of allowed packages with version spec (<package>@<spec>)
-  -d, --deny <deny>        comma separated list of denied packages with version spec (<package>@<spec>)
-  -e, --exclude <exclude>  comma separated list of exclude packages from validating
-  -i, --include <include>  comma separated list of include packages from validating
-  -m, --minDays <days>     minimum days after publish (default 14)
-  -j, --json               display output as JSON
-  -u, --unsafe             return only unsafe packages
-  --debug                  show debug messages
-  --excludeDev             exclude development dependencies for validation (ignored for Yarn projects only)
-  -h, --help               display help for command
+  -c, --config <path>        use specified path to config file
+  -a, --allow <allow>        comma separated list of allowed packages with version spec (<package>@<spec>)
+  -d, --deny <deny>          comma separated list of denied packages with version spec (<package>@<spec>)
+  -e, --exclude <exclude>    comma separated list of exclude packages from validating
+  -i, --include <include>    comma separated list of include packages from validating
+  -m, --minDays <days>       minimum days after publish (default 14)
+  -j, --json                 display output as JSON
+  -p, --production           if it possible, then check specified version from lock file
+  -u, --unsafe               return only unsafe packages
+  --debug                    show debug messages
+  --excludeDev               exclude development dependencies for validation (ignored for Yarn projects only)
+  --ignoreConfig             ignore config file, even if used specified path
+  --ignoreOptions <options>  comma separated list of options to ignore from config file
+  -h, --help                 display help for command
 ----
 
 .Example output:

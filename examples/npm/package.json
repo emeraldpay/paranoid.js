@@ -1,0 +1,10 @@
+{
+  "name": "example",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@8.19.2",
+  "dependencies": {
+    "fastify": "4.8.0",
+    "semver": "4.3.1"
+  }
+}

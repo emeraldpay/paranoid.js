@@ -4,10 +4,12 @@ import { existsSync, statSync as pathStat } from 'fs';
 import { resolve as resolvePath } from 'path';
 import * as process from 'process';
 import * as Arborist from '@npmcli/arborist';
+import * as Calculator from '@npmcli/metavuln-calculator';
 import { Command } from 'commander';
+import * as fetch from 'npm-registry-fetch';
 import { Packument } from 'pacote';
 import { createLogger, format as loggerFormat, transports as loggerTransports } from 'winston';
-import { Config, ExitCode, Node, Validation } from './types';
+import { Advisory, Config, Dependency, ExitCode, Node, Validation } from './types';
 import {
   buildFlatDependencies,
   loadYarnLockfileDependencies,
@@ -19,18 +21,19 @@ const program = new Command();
 
 program
   .argument('<path>', 'path to project directory')
-  .option('-c, --config <path>', 'Specify path to config file')
+  .option('-c, --config <path>', 'use specified path to config file')
   .option('-a, --allow <allow>', 'comma separated list of allowed packages with version spec (<package>@<spec>)')
   .option('-d, --deny <deny>', 'comma separated list of denied packages with version spec (<package>@<spec>)')
   .option('-e, --exclude <exclude>', 'comma separated list of exclude packages from validating')
   .option('-i, --include <include>', 'comma separated list of include packages from validating')
   .option('-m, --minDays <days>', 'minimum days after publish (default 14)')
   .option('-j, --json', 'display output as JSON')
+  .option('-p, --production', 'if it possible, then check specified version from lock file')
   .option('-u, --unsafe', 'return only unsafe packages')
   .option('--debug', 'show debug messages')
   .option('--excludeDev', 'exclude development dependencies for validation (ignored for Yarn projects only)')
-  .option('--ignoreConfig', 'Ignore all options from config file')
-  .option('--ignoreOptions <options>', 'Comma separated list of options to ignore from config file')
+  .option('--ignoreConfig', 'ignore config file, even if used specified path')
+  .option('--ignoreOptions <options>', 'comma separated list of options to ignore from config file')
   .parse();
 
 const [path] = program.args;
@@ -75,10 +78,11 @@ const logger = createLogger({
           deny: configData.deny,
           exclude: configData.exclude,
           include: configData.include,
-          excludeDev: configData.excludeDev,
-          json: configData.json,
           minDays: configData.minDays,
+          json: configData.json,
+          production: configData.production,
           unsafe: configData.unsafe,
+          excludeDev: configData.excludeDev,
         };
       } catch (exception) {
         logger.error('Cannot read config file');
@@ -148,22 +152,26 @@ const logger = createLogger({
       .map((include: string) => include.trim());
   }
 
-  if (options.excludeDev != null) {
-    config.excludeDev = true;
-  }
-
-  if (options.json != null) {
-    config.json = true;
-  }
-
   if (options.minDays != null) {
     const days = parseInt(options.minDays, 10);
 
     config.minDays = isNaN(days) ? undefined : days;
   }
 
+  if (options.json != null) {
+    config.json = true;
+  }
+
+  if (options.production != null) {
+    config.production = true;
+  }
+
   if (options.unsafe != null) {
     config.unsafe = true;
+  }
+
+  if (options.excludeDev != null) {
+    config.excludeDev = true;
   }
 
   const yarnLockfilePath = resolvePath(path, 'yarn.lock');
@@ -174,7 +182,7 @@ const logger = createLogger({
 
   !(config.json ?? false) && logger.info('Start loading dependency list...');
 
-  let dependencies: Map<string, Set<string>>;
+  let dependencies: Map<string, Dependency>;
 
   if (hasNpmLockfile || (hasNodeModules && !hasYarnLockfile)) {
     const arborist = new Arborist({ path });
@@ -211,37 +219,83 @@ const logger = createLogger({
 
   !(config.json ?? false) && logger.info('Validate dependencies...');
 
-  const validation = validateDependencies(dependencies, packuments, config);
+  const vulnerabilities = new Map<string, Advisory[]>();
+
+  try {
+    const request = await fetch('/-/npm/v1/security/advisories/bulk', {
+      body: Object.fromEntries(
+        [...dependencies].reduce<Array<[string, Array<string>]>>(
+          (carry, [name, { versions }]) => [...carry, [name, [...versions]]],
+          [],
+        ),
+      ),
+      gzip: true,
+      method: 'POST',
+    });
+
+    const advisories: Record<string, unknown[]> = await request.json();
+
+    const calculator = new Calculator();
+
+    for (const [name, items] of Object.entries(advisories)) {
+      for (const item of items) {
+        const advisory = await calculator.calculate(name, item);
+
+        const vulnerability = vulnerabilities.get(name) ?? [];
+
+        vulnerability.push(advisory);
+
+        vulnerabilities.set(name, vulnerability);
+      }
+    }
+  } catch (exception) {
+    logger.warn(`Cannot get security advisories: ${(exception as Error).message}`);
+    logger.debug(exception);
+  }
+
+  const validations = validateDependencies(dependencies, packuments, vulnerabilities, config);
 
   let fullSafe = true;
 
   if (config.json === true) {
-    const data: Record<string, Validation> = {};
+    const data: Record<string, Validation[]> = {};
 
-    for (const [name, valid] of validation) {
-      if (valid.safe) {
-        if (config.unsafe !== true) {
-          data[name] = valid;
-        }
-      } else {
-        data[name] = valid;
-      }
+    for (const [name, items] of validations) {
+      data[name] = config.unsafe === true ? items.filter((validation) => !validation.safe) : items;
 
-      fullSafe &&= valid.safe;
+      fullSafe &&= items.reduce((carry, validation) => carry && validation.safe, true);
     }
 
     console.log(JSON.stringify(data));
   } else {
-    for (const [name, { daysSincePublish, safe, version }] of validation) {
-      if (safe) {
-        if (config.unsafe !== true) {
-          logger.info(`Package ${name}@${version} is safe`);
-        }
-      } else {
-        logger.warn(`Package ${name}@${version} is not safe (${daysSincePublish} day(s) since last publish)`);
-      }
+    for (const [name, items] of validations) {
+      for (const { daysSincePublish, recommendations, safe, version } of items) {
+        if (recommendations.length > 0) {
+          logger.warn(`Package ${name}@${version} is not safe:`);
 
-      fullSafe &&= safe;
+          for (const [index, { dependency, fixedVersion, range, severity, title, url }] of recommendations.entries()) {
+            if (recommendations.length > 1) {
+              logger.warn(`\t-- ${index + 1} of ${recommendations.length} --`);
+            }
+
+            if (dependency !== name) {
+              logger.warn(`\tDependency "${dependency}" is vulnerable`);
+            }
+
+            logger.warn(`\tDescription: ${title}`);
+            logger.warn(`\tHas a ${severity} severity, check ${url} for more details`);
+            logger.warn(`\tVersions ${range} is affected, install version ${fixedVersion}`);
+          }
+        } else if (safe) {
+          if (config.unsafe !== true) {
+            logger.info(`Package ${name}@${version} is safe`);
+          }
+        } else {
+          logger.warn(`Package ${name}@${version} is not safe (${daysSincePublish} day(s) since last publish)`);
+        }
+
+        fullSafe &&= safe;
+      }
     }
   }
 
