@@ -7,5 +7,7 @@ module.exports = {
   // json: true,
   // production: true
   // unsafe: true,
+  // allowFrom: { package: '2022-11-14' },
   // excludeDev: false,
+  // mode: 'strict',
 };

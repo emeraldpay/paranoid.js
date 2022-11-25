@@ -36,6 +36,7 @@ Arguments:
   path                       path to project directory
 
 Options:
+  -V, --version              output the version number
   -c, --config <path>        use specified path to config file
   -a, --allow <allow>        comma separated list of allowed packages with version spec (<package>@<spec>)
   -d, --deny <deny>          comma separated list of denied packages with version spec (<package>@<spec>)
@@ -46,9 +47,11 @@ Options:
   -p, --production           if it possible, then check specified version from lock file
   -u, --unsafe               return only unsafe packages
   --debug                    show debug messages
+  --allowFrom <allow>        comma separated list of allowed packages with install date (<package>:<date>)
   --excludeDev               exclude development dependencies for validation (ignored for Yarn projects only)
   --ignoreConfig             ignore config file, even if used specified path
   --ignoreOptions <options>  comma separated list of options to ignore from config file
+  --mode <mode>              validation mode (choices: "common", "extend", "strict")
   -h, --help                 display help for command
 ----
 

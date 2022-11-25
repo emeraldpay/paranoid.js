@@ -8,7 +8,7 @@
       "preLaunchTask": "npm: build",
       "outputCapture": "std",
       "program": "${workspaceFolder}/app/index.js",
-      "args": ["-u", "--debug", "${workspaceFolder}/examples/npm"]
+      "args": ["-u", "--debug", "--mode", "strict", "${workspaceFolder}/examples/npm"]
     },
     {
       "type": "node",
@@ -17,7 +17,7 @@
       "preLaunchTask": "npm: build",
       "outputCapture": "std",
       "program": "${workspaceFolder}/app/index.js",
-      "args": ["-u", "--debug", "${workspaceFolder}/examples/yarn-berry"]
+      "args": ["-u", "--debug", "--mode", "strict", "${workspaceFolder}/examples/yarn-berry"]
     },
     {
       "type": "node",
@@ -26,7 +26,7 @@
       "preLaunchTask": "npm: build",
       "outputCapture": "std",
       "program": "${workspaceFolder}/app/index.js",
-      "args": ["-u", "--debug", "${workspaceFolder}/examples/yarn-classic"]
+      "args": ["-u", "--debug", "--mode", "strict", "${workspaceFolder}/examples/yarn-classic"]
     }
   ]
 }

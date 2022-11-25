@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
+    "removeComments": true,
     "rootDir": "src/",
     "module": "CommonJS",
     "moduleResolution": "Node",

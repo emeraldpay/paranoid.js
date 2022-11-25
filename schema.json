@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "definitions": {
+    "semver": {
+      "type": "string",
+      "minLength": 5,
+      "pattern": "^\\*$|^(?:0|[1-9]+)\\.(?:\\*|\\d+)(?:\\.\\*)?$|^(?:[~^<>]|<=|>=)?(?:0|[1-9]+)(?:\\.\\d+(?:\\.\\d+)?)?(?:-[0-9a-z.]+(?:\\+[0-9a-z.]+)?)?(?:(?:-(?:0|[1-9]+)(?:\\.\\d+(?:\\.\\d+)?)?)|(?: (?:[~^<>]|<=|>=)?(?:0|[1-9]+)(?:\\.\\d+(?:\\.\\d+)?)?(?:-[0-9a-z.]+(?:\\+[0-9a-z.]+)?)?))?$"
+    }
+  },
+  "type": "object",
+  "properties": {
+    "allow": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "$ref": "#/definitions/semver"
+        }
+      }
+    },
+    "deny": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "$ref": "#/definitions/semver"
+        }
+      }
+    },
+    "exclude": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "include": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "minDays": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "json": {
+      "type": "boolean"
+    },
+    "production": {
+      "type": "boolean"
+    },
+    "unsafe": {
+      "type": "boolean"
+    },
+    "allowFrom": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "excludeDev": {
+      "type": "boolean"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["common", "extend", "strict"]
+    }
+  }
+}

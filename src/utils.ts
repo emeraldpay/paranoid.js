@@ -7,10 +7,11 @@ import {
   lt as isLessVersion,
   maxSatisfying as maxSatisfyingVersion,
   minVersion,
+  subset as rangeSubset,
   validRange,
   satisfies as versionSatisfies,
 } from 'semver';
-import { Config, Dependencies, Dependency, Node, Recommendation, Validation, Vulnerabilities } from './types';
+import { ConfigMap, Dependencies, Dependency, Node, Recommendation, Validation, Vulnerabilities } from './types';
 
 const specRegex = /^(@?[^@]+)@([^:]+:)?([^$]+)$/;
 
@@ -22,7 +23,22 @@ function arrayToRegExp(array?: string[]): null | RegExp {
   return new RegExp(array.map((exclude) => exclude.replace('/*', '\\/.*')).join('|'));
 }
 
-export function buildFlatDependencies(tree: Node, config: Config): Dependencies {
+export function mapFromObject<I extends O, O>(
+  from: Record<string, I> | undefined,
+  transform?: (entry: [string, I]) => [string, O],
+): Map<string, O> | undefined {
+  if (from == null) {
+    return undefined;
+  }
+
+  if (transform == null) {
+    return new Map(Object.entries(from));
+  }
+
+  return new Map(Object.entries(from).map(transform));
+}
+
+export function buildFlatDependencies(tree: Node, config: ConfigMap): Dependencies {
   let dependencies = new Map<string, Dependency>();
 
   for (const [name, edge] of tree.edgesOut) {
@@ -87,7 +103,7 @@ export async function loadYarnLockfileDependencies(path: string): Promise<Depend
   return dependencies;
 }
 
-export function processDependencies(dependencies: Dependencies, config: Config): Promise<Packument[]> {
+export function processDependencies(dependencies: Dependencies, config: ConfigMap): Promise<Packument[]> {
   const excluded = arrayToRegExp(config.exclude);
   const included = arrayToRegExp(config.include);
 
@@ -117,8 +133,9 @@ export function validateDependencies(
   dependencies: Dependencies,
   packuments: Packument[],
   vulnerabilities: Vulnerabilities,
-  config: Config,
+  config: ConfigMap,
 ): Map<string, Validation[]> {
+  const minDays = config.minDays ?? 14;
   const now = DateTime.now();
 
   const validations = new Map<string, Validation[]>();
@@ -137,7 +154,24 @@ export function validateDependencies(
       if (config.production && dependency.versions.size > 0) {
         specs = dependency.versions;
       } else {
-        ({ specs } = dependency);
+        specs = new Set(
+          [...dependency.specs]
+            .sort((first, second) => (rangeSubset(first, second) ? -1 : 1))
+            .reduce<string[]>((carry, spec) => {
+              if (carry.length === 0) {
+                return [spec];
+              }
+
+              for (const subset of carry) {
+                if (rangeSubset(subset, spec)) {
+                  return carry;
+                }
+              }
+
+              return [...carry, spec];
+            }, [])
+            .reverse(),
+        );
       }
     }
 
@@ -147,9 +181,12 @@ export function validateDependencies(
       const allowedSpec = config.allow?.get(packument.name);
       const deniedSpec = config.deny?.get(packument.name);
 
+      const allowedFrom = config.allowFrom?.get(packument.name);
+
       if (
         (allowedSpec == null || versionSatisfies(version, allowedSpec)) &&
-        (deniedSpec == null || versionSatisfies(version, deniedSpec))
+        (deniedSpec == null || versionSatisfies(version, deniedSpec)) &&
+        (allowedFrom == null || now.diff(allowedFrom.plus({ days: minDays }), 'days').days >= 0)
       ) {
         const published = packument.time?.[version] ?? now.toISO();
         const { days } = now.diff(DateTime.fromISO(published), 'days');
@@ -184,7 +221,7 @@ export function validateDependencies(
           recommendations,
           version,
           daysSincePublish: Math.floor(days),
-          safe: days >= (config.minDays ?? 14),
+          safe: days >= minDays,
         });
 
         validations.set(packument.name, validation);
